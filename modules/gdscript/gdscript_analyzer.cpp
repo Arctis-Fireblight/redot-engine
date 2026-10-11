@@ -467,7 +467,7 @@ Error GDScriptAnalyzer::resolve_class_inheritance(GDScriptParser::ClassNode *p_c
 
 			Error err = ext_parser->raise_status(GDScriptParserRef::INHERITANCE_SOLVED);
 			if (err != OK) {
-				push_error(vformat(R"(Could not resolve super class inheritance from "%s".)", p_class->extends_path), p_class);
+				push_dependency_error(vformat(R"(Could not resolve super class inheritance from "%s".)", p_class->extends_path), ext_parser, p_class);
 				return err;
 			}
 
@@ -502,7 +502,7 @@ Error GDScriptAnalyzer::resolve_class_inheritance(GDScriptParser::ClassNode *p_c
 
 					Error err = base_parser->raise_status(GDScriptParserRef::INHERITANCE_SOLVED);
 					if (err != OK) {
-						push_error(vformat(R"(Could not resolve super class inheritance from "%s".)", name), id);
+						push_dependency_error(vformat(R"(Could not resolve super class inheritance from "%s".)", name), base_parser, id);
 						return err;
 					}
 
@@ -5089,7 +5089,7 @@ GDScriptParser::DataType GDScriptAnalyzer::make_global_class_meta_type(const Str
 
 		Error err = ref->raise_status(GDScriptParserRef::USES_SOLVED);
 		if (err) {
-			push_error(vformat(R"(Could not resolve class "%s", because of a parser error.)", p_class_name), p_source);
+			push_dependency_error(vformat(R"(Could not resolve class "%s".)", p_class_name), ref, p_source);
 			type.type_source = GDScriptParser::DataType::UNDETECTED;
 			type.kind = GDScriptParser::DataType::VARIANT;
 			return type;
@@ -7753,9 +7753,25 @@ bool GDScriptAnalyzer::check_type_compatibility(const GDScriptParser::DataType &
 	return false;
 }
 
-void GDScriptAnalyzer::push_error(const String &p_message, const GDScriptParser::Node *p_origin) {
+void GDScriptAnalyzer::push_error(const String &p_message, const GDScriptParser::Node *p_origin, const ScriptLanguage::ScriptError::RelatedError &p_related_error) {
 	mark_node_unsafe(p_origin);
-	parser->push_error(p_message, p_origin);
+	parser->push_error(p_message, p_origin, p_related_error);
+}
+
+void GDScriptAnalyzer::push_dependency_error(const String &p_message, const Ref<GDScriptParserRef> &p_dependency, const GDScriptParser::Node *p_origin) {
+	const List<GDScriptParser::ParserError> &dependency_errors = p_dependency->get_parser()->get_errors();
+	if (dependency_errors.is_empty()) {
+		push_error(p_message + " " + vformat(R"(Could not parse "%s".)", p_dependency->get_path()), p_origin);
+		return;
+	}
+
+	const GDScriptParser::ParserError &dependency_error = dependency_errors.front()->get();
+	ScriptLanguage::ScriptError::RelatedError related_error = dependency_error.related_error;
+	if (related_error.path.is_empty()) {
+		related_error = { p_dependency->get_path(), dependency_error.line, dependency_error.column, dependency_error.message };
+	}
+	// Reuse the original cause through dependency chains without nesting diagnostic messages.
+	push_error(p_message + " " + vformat("%s:%d:%d: %s", related_error.path, related_error.line, related_error.column, related_error.message), p_origin, related_error);
 }
 
 void GDScriptAnalyzer::mark_node_unsafe(const GDScriptParser::Node *p_node) {
