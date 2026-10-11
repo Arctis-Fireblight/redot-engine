@@ -3919,7 +3919,7 @@ void GDScriptAnalyzer::reduce_assignment(GDScriptParser::AssignmentNode *p_assig
 		invalidate_member_narrowing();
 	}
 
-	if (narrow_target.is_valid() && p_assignment->operation == GDScriptParser::AssignmentNode::OP_NONE && p_assignment->assignee->get_datatype().is_nullable) {
+	if (p_assignment->assigned_value != nullptr && narrow_target.is_valid() && p_assignment->operation == GDScriptParser::AssignmentNode::OP_NONE && p_assignment->assignee->get_datatype().is_nullable) {
 		const GDScriptParser::DataType rhs_type = p_assignment->assigned_value->get_datatype();
 		if (rhs_type.is_set() && rhs_type.is_hard_type() && !rhs_type.is_nullable && rhs_type.kind == GDScriptParser::DataType::BUILTIN && rhs_type.builtin_type != Variant::OBJECT && rhs_type.builtin_type != Variant::NIL) {
 			narrowed_non_null.push_back(narrow_target);
