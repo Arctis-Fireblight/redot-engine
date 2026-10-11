@@ -65,7 +65,7 @@
 namespace GDScriptTests {
 
 TEST_CASE("[Modules][GDScript] Reserved keywords identify the invalid declaration") {
-	for (const String &keyword : { "uses", "while", "and", "trait_name" }) {
+	for (const String keyword : { "uses", "while", "and", "trait_name" }) {
 		GDScriptParser parser;
 		CHECK(parser.parse("var " + keyword + " = 1\n", "res://keyword_name.gd", false) == ERR_PARSE_ERROR);
 		REQUIRE_FALSE(parser.get_errors().is_empty());
@@ -110,34 +110,66 @@ TEST_CASE("[Modules][GDScript] Dependency diagnostics retain the original source
 	}
 	ScriptServer::add_global_class("TestDiagnosticDependency", "RefCounted", "GDScript", dependency_path, false, false);
 	ScriptServer::add_global_class("TestDiagnosticIntermediate", "RefCounted", "GDScript", intermediate_path, false, false);
-	String class_name = "TestDiagnosticDependency";
+	ProjectSettings::get_singleton()->add_autoload({ "TestDiagnosticAutoload", dependency_path, true });
+	String source = "extends RefCounted\nvar value = TestDiagnosticDependency.new()\n";
+	int error_line = 2;
 	SUBCASE("Direct dependency") {
 	}
 	SUBCASE("Inheritance chain") {
-		class_name = "TestDiagnosticIntermediate";
+		source = "extends RefCounted\nvar value = TestDiagnosticIntermediate.new()\n";
+	}
+	SUBCASE("Global class type annotation") {
+		source = "extends RefCounted\nvar value: TestDiagnosticDependency\n";
+	}
+	SUBCASE("Autoload inheritance") {
+		source = "extends TestDiagnosticAutoload\n";
+		error_line = 1;
+	}
+	SUBCASE("Trait path dependency") {
+		source = "extends RefCounted\nuses \"" + dependency_path + "\"\n";
 	}
 
 	List<ScriptLanguage::ScriptError> errors;
-	CHECK_FALSE(GDScriptLanguage::get_singleton()->validate("extends RefCounted\nvar value = " + class_name + ".new()\n", "res://dependency_diagnostic_consumer.gd", nullptr, &errors));
+	CHECK_FALSE(GDScriptLanguage::get_singleton()->validate(source, "res://dependency_diagnostic_consumer.gd", nullptr, &errors));
 	CHECK_FALSE(errors.is_empty());
 	if (!errors.is_empty()) {
 		const ScriptLanguage::ScriptError &error = errors.front()->get();
 		CHECK(error.path == "res://dependency_diagnostic_consumer.gd");
-		CHECK(error.line == 2);
+		CHECK(error.line == error_line);
 		CHECK(error.related_error.path == dependency_path);
 		CHECK(error.related_error.line == 3);
 		CHECK(error.related_error.column == 5);
 		CHECK(error.related_error.message.contains("\"uses\" is a reserved keyword"));
 		CHECK(error.message.contains(dependency_path + ":3:5:"));
-		CHECK(error.message.count("Could not resolve class") == 1);
+		CHECK(error.message.count("\"uses\" is a reserved keyword") == 1);
 	}
 
+	ProjectSettings::get_singleton()->remove_autoload("TestDiagnosticAutoload");
 	ScriptServer::remove_global_class("TestDiagnosticIntermediate");
 	ScriptServer::remove_global_class("TestDiagnosticDependency");
 	GDScriptCache::remove_parser(intermediate_path);
 	GDScriptCache::remove_parser(dependency_path);
 	CHECK(DirAccess::remove_absolute(intermediate_path) == OK);
 	CHECK(DirAccess::remove_absolute(dependency_path) == OK);
+}
+
+TEST_CASE("[Modules][GDScript] Missing global class type dependency retains its fallback error") {
+	GDScriptLanguage::get_singleton()->init();
+	const String dependency_path = TestUtils::get_temp_path("missing_dependency_diagnostic.gd");
+	REQUIRE_FALSE(FileAccess::exists(dependency_path));
+	ScriptServer::add_global_class("TestDiagnosticMissing", "RefCounted", "GDScript", dependency_path, false, false);
+
+	List<ScriptLanguage::ScriptError> errors;
+	CHECK_FALSE(GDScriptLanguage::get_singleton()->validate("extends RefCounted\nvar value: TestDiagnosticMissing\n", "res://missing_dependency_diagnostic_consumer.gd", nullptr, &errors));
+	CHECK_FALSE(errors.is_empty());
+	if (!errors.is_empty()) {
+		const ScriptLanguage::ScriptError &error = errors.front()->get();
+		CHECK(error.message == "Could not parse global class \"TestDiagnosticMissing\" from \"" + dependency_path + "\".");
+		CHECK(error.related_error.path.is_empty());
+	}
+
+	ScriptServer::remove_global_class("TestDiagnosticMissing");
+	GDScriptCache::remove_parser(dependency_path);
 }
 #endif
 

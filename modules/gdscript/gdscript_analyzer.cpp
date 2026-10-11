@@ -530,7 +530,7 @@ Error GDScriptAnalyzer::resolve_class_inheritance(GDScriptParser::ClassNode *p_c
 
 				Error err = info_parser->raise_status(GDScriptParserRef::INHERITANCE_SOLVED);
 				if (err != OK) {
-					push_error(vformat(R"(Could not resolve super class inheritance from "%s".)", name), id);
+					push_dependency_error(vformat(R"(Could not resolve super class inheritance from "%s".)", name), info_parser, id);
 					return err;
 				}
 
@@ -861,8 +861,12 @@ GDScriptParser::DataType GDScriptAnalyzer::resolve_datatype(GDScriptParser::Type
 				String ext = path.get_extension();
 				if (ext == GDScriptLanguage::get_singleton()->get_extension()) {
 					Ref<GDScriptParserRef> ref = parser->get_depended_parser_for(path);
-					if (ref.is_null() || ref->raise_status(GDScriptParserRef::USES_SOLVED) != OK) {
+					if (ref.is_null()) {
 						push_error(vformat(R"(Could not parse global class "%s" from "%s".)", first, ScriptServer::get_global_class_path(first)), p_type);
+						return bad_type;
+					}
+					if (ref->raise_status(GDScriptParserRef::USES_SOLVED) != OK) {
+						push_dependency_error(vformat(R"(Could not parse global class "%s" from "%s".)", first, path), ref, p_type);
 						return bad_type;
 					}
 					result = ref->get_parser()->head->get_datatype();
@@ -1777,7 +1781,7 @@ void GDScriptAnalyzer::resolve_class_uses(GDScriptParser::ClassNode *p_class, co
 			}
 			Error err = ext_parser_ref->raise_status(GDScriptParserRef::BODY_SOLVED);
 			if (err) {
-				push_error(vformat(R"(Could not resolve trait's body from "%s".)", uses->path), uses);
+				push_dependency_error(vformat(R"(Could not resolve trait's body from "%s".)", uses->path), ext_parser_ref, uses);
 				continue;
 			}
 			trait = ext_parser_ref->get_parser()->head;
